@@ -271,6 +271,8 @@ export default function App() {
   return (
     <div
       style={{
+
+        
         background: "#ede7e7ff",
         minHeight: "100vh",
         color: "#210303ff",
@@ -283,8 +285,8 @@ export default function App() {
         overflowX: "hidden"
       }}
     >
-      <h1 style={{ fontSize: "clamp(0.8rem, 4vw, 1rem)", margin: "0 0 10px 0" }}>
-        🤟 ASL Fingerspelling
+      <h1 style={{ fontSize: "clamp(0.8rem, 4vw, 1rem)", margin: "0 0 10px 0" , color: "#2b9308ff"}}>
+        Welcome to Signetic - Sign Language to Text Converter
       </h1>
 
       <h2 style={{ fontSize: "clamp(1rem, 6vw, 1.5rem)", margin: "0 0 10px 0", color: "#272704ff", minHeight: "30px" }}>
