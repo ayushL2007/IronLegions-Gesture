@@ -15,16 +15,16 @@ export default function App() {
   const lastWrittenLetter = useRef("");
   const stableGesture = useRef("");
   const stableCount = useRef(0);
-  const STABLE_THRESHOLD = 15; // --- SMOOTHING BUFFER ---
+  const STABLE_THRESHOLD = 15;
 
+  // --- NEW: Track Hand Presence for Auto-Space ---
+  const wasHandPresent = useRef(false);
+
+  // --- SMOOTHING BUFFER ---
   const gestureBuffer = useRef([]);
-  const BUFFER_SIZE = 5; // --- WAVE VARS ---
+  const BUFFER_SIZE = 5;
 
-  const prevWristX = useRef(null);
-  const waveCycles = useRef(0);
-  const waveDirection = useRef(0);
-  const stationaryFrames = useRef(0); // Theme constants
-
+  // Theme constants
   const THEME_COLOR = "#FFFFC5";
   const THEME_RGB = "255, 255, 197";
 
@@ -66,7 +66,7 @@ export default function App() {
   const recognizeGesture = useCallback((hand) => {
     const k = hand.keypoints;
     const handSize = Math.hypot(k[9].x - k[0].x, k[9].y - k[0].y);
-    const T = (factor) => handSize * factor; // --- 1. DETERMINE FINGER STATES ---
+    const T = (factor) => handSize * factor;
 
     const isExtended = (tip, mcp) => {
       const dist = Math.hypot(k[tip].x - k[mcp].x, k[tip].y - k[mcp].y);
@@ -81,98 +81,65 @@ export default function App() {
     const thumbTip = k[4];
     const indexMcp = k[5];
     const distThumbIndex = Math.hypot(thumbTip.x - k[8].x, thumbTip.y - k[8].y);
-    const distIndexTipKnuckle = Math.hypot(k[8].x - k[5].x, k[8].y - k[5].y); // --- 2. WAVE DETECTION (Strict) ---
+    const distIndexTipKnuckle = Math.hypot(k[8].x - k[5].x, k[8].y - k[5].y);
 
-    if (indexExt && middleExt && ringExt && pinkyExt) {
-      const wristX = k[0].x;
-      if (prevWristX.current !== null) {
-        const diff = wristX - prevWristX.current;
-        const speed = Math.abs(diff);
-
-        if (speed > T(0.04)) {
-          stationaryFrames.current = 0;
-          const currentDir = diff > 0 ? 1 : -1;
-          if (currentDir !== waveDirection.current) {
-            waveCycles.current += 1;
-            waveDirection.current = currentDir;
-          }
-        } else {
-          stationaryFrames.current += 1;
-          if (stationaryFrames.current > 10) {
-            waveCycles.current = 0;
-          }
-        }
-      }
-      prevWristX.current = wristX;
-    } else {
-      waveCycles.current = 0;
-      prevWristX.current = null;
+    // --- ALPHABET LOGIC ---
+    
+    // Single Finger Group
+    if (indexExt && !middleExt && !ringExt && !pinkyExt) {
+      const xDiff = Math.abs(k[8].x - k[5].x);
+      const yDiff = Math.abs(k[8].y - k[5].y);
+      if (xDiff > yDiff + T(0.1)) return "G";
+      const distThumbBase = Math.hypot(thumbTip.x - indexMcp.x, thumbTip.y - indexMcp.y);
+      if (distThumbBase > T(0.9)) return "L";
+      if (k[8].y > k[6].y - T(0.2)) return "X";
+      return "D";
     }
 
-    if (waveCycles.current >= 4) return "👋 HELLO"; // --- 3. SINGLE FINGER GROUP (D, G, L, X) --- // This handles ALL cases where Index is Extended but others are Curled.
-
-    if (indexExt && !middleExt && !ringExt && !pinkyExt) {
-      // ** G Check (Horizontal) **
-      // Compare X width vs Y height of the Index Finger.
-      // If Width > Height, finger is sideways.
-      const xDiff = Math.abs(k[8].x - k[5].x);
-      const yDiff = Math.abs(k[8].y - k[5].y); // T(0.1) adds a buffer so slightly tilted fingers don't flicker.
-      if (xDiff > yDiff + T(0.1)) {
-        return "G";
-      } // ** L Check (Thumb Out) **
-
-      const distThumbBase = Math.hypot(
-        thumbTip.x - indexMcp.x,
-        thumbTip.y - indexMcp.y
-      );
-      if (distThumbBase > T(0.9)) {
-        return "L";
-      } // ** X Check (Hooked) ** // If the tip is lower than the mid-joint (PIP), it's hooked. // Note: Y increases downwards.
-      if (k[8].y > k[6].y - T(0.2)) {
-        return "X";
-      } // ** D Check (Vertical) ** // If it's not G, L, or X, it must be D.
-
-      return "D";
-    } // --- 4. GLOBAL "O" CHECK ---
-
+    // Global O
     if (!middleExt && !ringExt && !pinkyExt) {
       if (distIndexTipKnuckle > T(0.55)) return "O";
-    } // --- 5. STRICT F CHECK ---
+    }
 
+    // F
     if (distThumbIndex < T(0.45)) {
       if (middleExt && ringExt && pinkyExt) return "F";
-    } // --- 6. TWO FINGER GROUP (H, U, R, V) ---
+    }
 
+    // Two Fingers
     if (indexExt && middleExt && !ringExt && !pinkyExt) {
       const xDiff = Math.abs(k[8].x - k[5].x);
       const yDiff = Math.abs(k[8].y - k[5].y);
       if (xDiff > yDiff) return "H";
-
       if (k[8].x > k[12].x && k[8].x - k[12].x < T(0.4)) return "R";
       const distTips = Math.hypot(k[8].x - k[12].x, k[8].y - k[12].y);
       if (distTips > T(0.5)) return "V";
       return "U";
-    } // --- 7. FIST GROUP (A, E, S, T) ---
+    }
 
+    // Fists
     if (!indexExt && !middleExt && !ringExt && !pinkyExt) {
       if (distIndexTipKnuckle > T(0.65)) return "O";
       if (thumbTip.y > indexMcp.y) return "E";
       const xDist = Math.abs(thumbTip.x - indexMcp.x);
       if (xDist > T(0.25)) return "A";
       return "S";
-    } // --- 8. PINKY ONLY GROUP (I, Y) ---
+    }
 
+    // Pinky
     if (!indexExt && !middleExt && !ringExt && pinkyExt) {
       const spread = Math.hypot(thumbTip.x - k[20].x, thumbTip.y - k[20].y);
       if (spread > T(1.2)) return "Y";
       return "I";
-    } // --- 9. OPEN HAND VARIANTS (B, C, Neutral) ---
+    }
 
+    // Open Hand
     if (indexExt && middleExt && ringExt && pinkyExt) {
       if (Math.abs(thumbTip.x - indexMcp.x) < T(0.35)) return "B";
       if (distThumbIndex < T(0.8) && distIndexTipKnuckle < T(0.85)) return "C";
       return "🖐️";
-    } // W Check
+    }
+
     if (indexExt && middleExt && ringExt && !pinkyExt) return "W";
 
     return "🖐️";
@@ -191,9 +158,13 @@ export default function App() {
 
     const hands = await detector.estimateHands(video, { flipHorizontal: true });
 
+    // --- HAND DETECTED ---
     if (hands.length > 0) {
+      // Mark that we see a hand
+      wasHandPresent.current = true;
+
       const hand = hands[0];
-      const rawGesture = recognizeGesture(hand); // --- SMOOTHING ---
+      const rawGesture = recognizeGesture(hand);
 
       gestureBuffer.current.push(rawGesture);
       if (gestureBuffer.current.length > BUFFER_SIZE) {
@@ -212,34 +183,27 @@ export default function App() {
         }
       });
 
-      setGesture(smoothedGesture); // --- TYPING ---
+      setGesture(smoothedGesture);
 
-      if (smoothedGesture === "👋 HELLO") {
-        if (lastWrittenLetter.current !== "👋 HELLO") {
-          setText((t) => t + " HELLO ");
-          lastWrittenLetter.current = "👋 HELLO";
-          waveCycles.current = 0;
-        }
+      // Typing Logic
+      if (smoothedGesture === stableGesture.current) {
+        stableCount.current += 1;
       } else {
-        if (smoothedGesture === stableGesture.current) {
-          stableCount.current += 1;
-        } else {
-          stableGesture.current = smoothedGesture;
-          stableCount.current = 1;
-        }
+        stableGesture.current = smoothedGesture;
+        stableCount.current = 1;
+      }
 
-        if (stableCount.current >= STABLE_THRESHOLD) {
-          if (
-            smoothedGesture !== "🖐️" &&
-            smoothedGesture !== "👀 Show your hand"
-          ) {
-            if (smoothedGesture !== lastWrittenLetter.current) {
-              setText((t) => t + smoothedGesture);
-              lastWrittenLetter.current = smoothedGesture;
-            }
-          } else if (smoothedGesture === "🖐️") {
-            lastWrittenLetter.current = "";
+      if (stableCount.current >= STABLE_THRESHOLD) {
+        if (
+          smoothedGesture !== "🖐️" &&
+          smoothedGesture !== "👀 Show your hand"
+        ) {
+          if (smoothedGesture !== lastWrittenLetter.current) {
+            setText((t) => t + smoothedGesture);
+            lastWrittenLetter.current = smoothedGesture;
           }
+        } else if (smoothedGesture === "🖐️") {
+          lastWrittenLetter.current = "";
         }
       }
 
@@ -249,10 +213,26 @@ export default function App() {
         ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
         ctx.fill();
       });
-    } else {
+    } 
+    // --- HAND NOT DETECTED (LOST) ---
+    else {
       setGesture("👀 Show your hand");
       stableCount.current = 0;
       lastWrittenLetter.current = "";
+
+      // ** AUTO SPACE LOGIC **
+      if (wasHandPresent.current) {
+          // The hand was just removed!
+          setText(prev => {
+              // Only add space if the last char isn't already a space
+              if (prev.length > 0 && !prev.endsWith(" ")) {
+                  return prev + " ";
+              }
+              return prev;
+          });
+          // Reset flag so we don't spam spaces
+          wasHandPresent.current = false;
+      }
     }
   }, [detector, recognizeGesture]);
 
@@ -277,11 +257,10 @@ export default function App() {
         padding: 10,
       }}
     >
-           {" "}
       <h1 style={{ fontSize: "clamp(2rem, 6vw, 3rem)" }}>
         🤟 ASL Fingerspelling
       </h1>
-                 {" "}
+
       <h2
         style={{
           fontSize: "clamp(3rem, 10vw, 5rem)",
@@ -291,7 +270,7 @@ export default function App() {
       >
         {gesture}
       </h2>
-                 {" "}
+
       <div
         style={{
           margin: "10px auto",
@@ -305,9 +284,9 @@ export default function App() {
           wordWrap: "break-word",
         }}
       >
-                {text || "✍️ Start signing..."}     {" "}
+        {text || "✍️ Start signing..."}
       </div>
-           {" "}
+
       <div
         style={{
           display: "flex",
@@ -316,7 +295,6 @@ export default function App() {
           margin: "15px 0",
         }}
       >
-               {" "}
         <button
           onClick={() => {
             setText("");
@@ -333,9 +311,9 @@ export default function App() {
             cursor: "pointer",
           }}
         >
-                    CLEAR ALL        {" "}
+          CLEAR ALL
         </button>
-               {" "}
+
         <button
           onClick={() => {
             setText((t) => t.slice(0, -1));
@@ -352,11 +330,10 @@ export default function App() {
             cursor: "pointer",
           }}
         >
-                    ⌫ BACKSPACE        {" "}
+          ⌫ BACKSPACE
         </button>
-             {" "}
       </div>
-           {" "}
+
       <div
         style={{
           margin: "auto",
@@ -369,16 +346,18 @@ export default function App() {
           overflow: "hidden",
         }}
       >
-               {" "}
         <Webcam
           ref={webcamRef}
           mirrored
           width={dim.w}
           height={dim.h}
-          videoConstraints={{ width: dim.w, height: dim.h, facingMode: "user" }}
+          videoConstraints={{
+            width: dim.w,
+            height: dim.h,
+            facingMode: "user",
+          }}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
-               {" "}
         <canvas
           ref={canvasRef}
           style={{
@@ -389,9 +368,7 @@ export default function App() {
             height: "100%",
           }}
         />
-             {" "}
       </div>
-         {" "}
     </div>
   );
 }
