@@ -108,12 +108,6 @@ export default function App() {
     // Helper: Distance between two keypoints
     const d = (i1, i2) => Math.hypot(k[i1].x - k[i2].x, k[i1].y - k[i2].y);
 
-    // --- VARIABLES FOR YOUR C LOGIC ---
-    const thumbTip = k[4];
-    const indexMcp = k[5]; // Index Knuckle
-    const distThumbIndex = Math.hypot(thumbTip.x - k[8].x, thumbTip.y - k[8].y);
-    const distIndexTipKnuckle = Math.hypot(k[8].x - k[5].x, k[8].y - k[5].y);
-
     // Check Orientation
     const pointingDown = k[8].y > k[0].y; 
 
@@ -159,12 +153,10 @@ export default function App() {
         return "U";
     }
 
-    // 5. OPEN HAND / W / F / B / C (INTEGRATED HERE)
+    // 5. OPEN HAND / W / F / B 
     if (indexExt && middleExt && ringExt) {
         if (pinkyExt) {
-            // ** C CHECK (Moved Here per your request) **
-            if (distThumbIndex < T(0.8) && distIndexTipKnuckle < T(0.85)) return "C";
-
+            // (Note: C check removed from here to prevent false positives)
             if (d(4, 17) < T(1.0)) return "B"; 
             return "🖐️";
         }
@@ -182,10 +174,26 @@ export default function App() {
         return "I";
     }
 
-    // 7. FIST GROUP (A, E, M, N, S, T, O)
+    // 7. FIST GROUP (A, C, E, M, N, S, T, O)
+    // Fingers are NOT fully extended
     if (!indexExt && !middleExt && !ringExt && !pinkyExt) {
         
-        // E vs O logic
+        // ** C CHECK ( STRICT ) **
+        // 1. Index finger is NOT tight (it has a curve). Length between Tip and Knuckle is "Medium".
+        // 2. Gap between Thumb and Index is "Medium" (Not touching like O, not wide like L).
+        const indexLen = d(8, 5);
+        const gap = d(4, 8);
+        
+        // "Medium Curve": Not a fist (<0.5) and not straight (>0.85)
+        const isCurved = indexLen > T(0.55) && indexLen < T(0.85);
+        // "Medium Gap": Not touching (<0.5) and not fully open (>0.9)
+        const hasGap = gap > T(0.5) && gap < T(0.9);
+
+        if (isCurved && hasGap) {
+             return "C";
+        }
+
+        // ** E vs O / S / A Logic **
         const indexCurl = d(8, 5);
         
         // O Check (Thumb touching Index AND Index is Arched)
@@ -321,7 +329,18 @@ export default function App() {
         <button onClick={speakText} style={{ padding: "8px 16px", background: "#2b9308ff", color: "#fff", border: "none", borderRadius: 8, fontSize: "0.9rem", fontWeight: "bold", cursor: "pointer" }}>🔊 HEAR</button>
       </div>
       <div style={{ position: "relative", width: dim.w, height: dim.h, border: `4px solid #272704ff`, borderRadius: "20px", overflow: "hidden", backgroundColor: "#000", boxShadow: `0 0 15px rgba(0,0,0,0.3)` }}>
-        <Webcam ref={webcamRef} mirrored width={dim.w} height={dim.h} videoConstraints={{ facingMode: "user", aspectRatio: dim.h > dim.w ? 0.75 : 1.333 }} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <Webcam 
+            ref={webcamRef} 
+            mirrored 
+            width={dim.w} 
+            height={dim.h} 
+            videoConstraints={{ facingMode: "user" }} 
+            style={{ 
+                width: "100%", 
+                height: "100%", 
+                objectFit: "contain"
+            }} 
+        />
         <canvas ref={canvasRef} style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
       </div>
     </div>
