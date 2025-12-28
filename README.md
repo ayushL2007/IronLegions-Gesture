@@ -116,7 +116,7 @@ Signetic supports the full ASL alphabet with specialized logic for tricky gestur
 | **N** | ✊ Thumb tucked between Middle & Ring finger. |
 | **T** | ✊ Thumb tucked between Index & Middle finger. |
 | **R** | 🤞 Crossed Index and Middle fingers. |
-| **X** | 🪝 Hooked Index finger. |
+
 
 ---
 
