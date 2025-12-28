@@ -37,7 +37,6 @@ export default function App() {
         setText("");
         lastWrittenLetter.current = "";
       } else if (event.key === " ") {
-        // Spacebar support
         setText((prev) => prev + " ");
         lastWrittenLetter.current = "";
       }
@@ -46,6 +45,15 @@ export default function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  // --- TEXT TO SPEECH FUNCTION ---
+  const speakText = () => {
+    if (!text) return;
+    const utterance = new SpeechSynthesisUtterance(text);
+    // You can adjust rate/pitch here if needed
+    utterance.rate = 1; 
+    window.speechSynthesis.speak(utterance);
+  };
 
   // --- RESPONSIVE DIMENSIONS ---
   useEffect(() => {
@@ -195,7 +203,7 @@ export default function App() {
 
     if (hands.length > 0) {
       // ** HAND DETECTED **
-      wasHandPresent.current = true; // Mark hand as present
+      wasHandPresent.current = true;
 
       const hand = hands[0];
       const rawGesture = recognizeGesture(hand);
@@ -250,7 +258,6 @@ export default function App() {
       lastWrittenLetter.current = "";
 
       if (wasHandPresent.current) {
-          // If the hand was visible and now it's gone, add a space
           setText(prev => (prev.length > 0 && !prev.endsWith(" ") ? prev + " " : prev));
           wasHandPresent.current = false;
       }
@@ -271,8 +278,6 @@ export default function App() {
   return (
     <div
       style={{
-
-        
         background: "#ede7e7ff",
         minHeight: "100vh",
         color: "#210303ff",
@@ -342,6 +347,22 @@ export default function App() {
           }}
         >
           BACK
+        </button>
+
+        <button
+          onClick={speakText}
+          style={{
+            padding: "8px 16px",
+            background: "#2b9308ff",
+            color: "#fff",
+            border: "none",
+            borderRadius: 8,
+            fontSize: "0.9rem",
+            fontWeight: "bold",
+            cursor: "pointer"
+          }}
+        >
+           HEAR
         </button>
       </div>
 
