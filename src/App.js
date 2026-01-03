@@ -314,9 +314,54 @@ export default function App() {
 
   return (
     <div style={{ background: "#ede7e7ff", minHeight: "100vh", color: "#210303ff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start", padding: "15px", boxSizing: "border-box", overflowX: "hidden" }}>
-      <h1 style={{ fontSize: "clamp(0.8rem, 4vw, 1rem)", margin: "0 0 10px 0", color: "#2b9308ff" }}>
-        Welcome to Signetic - Sign Language to Text Converter
-      </h1>
+      {/* NAVBAR */}
+<div
+  style={{
+    width: "100%",
+    maxWidth: "900px",
+    marginBottom: "15px",
+    padding: "10px 16px",
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    borderRadius: "16px",
+    background: "rgba(255, 255, 255, 0.25)",
+    backdropFilter: "blur(12px)",
+    WebkitBackdropFilter: "blur(12px)",
+    border: "1px solid rgba(255, 255, 255, 0.3)",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+  }}
+>
+  <img
+    src={process.env.PUBLIC_URL + "logo.jpg"}
+    alt="Signetic Logo"
+    style={{
+      width: "40px",
+      height: "40px",
+      objectFit: "contain",
+    }}
+  />
+
+  <span
+    style={{
+      marginLeft: "auto",
+      fontSize: "clamp(1rem, 4vw, 1.2rem)",
+      fontWeight: "700",
+      color: "#272704ff",
+      letterSpacing: "0.5px",
+      padding: "6px 12px",
+      borderRadius: "12px",
+      background: "rgba(255, 255, 197, 0.2)",
+      border: "1px solid rgba(255, 255, 197, 0.4)",
+      boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+    }}
+  >
+    SIGNETIC
+  </span>
+</div>
+
+
+
       <h2 style={{ fontSize: "clamp(1rem, 6vw, 1.5rem)", margin: "0 0 10px 0", color: "#272704ff", minHeight: "30px" }}>
         {gesture}
       </h2>
