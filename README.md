@@ -1,5 +1,5 @@
 # Signetic 
-**LIVE DEMO 🔴 : https://iron-legions-gesture.vercel.app/
+LIVE DEMO 🔴 : https://iron-legions-gesture.vercel.app/
 
 ## Real-Time Sign Language to Text Translation
 
@@ -285,4 +285,5 @@ It stands at the intersection of:
 ---
 
 > "Accessibility should not be limited by permission, hardware, or compromise — Signetic proves that."
+
 
