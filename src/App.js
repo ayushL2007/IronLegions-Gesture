@@ -2,134 +2,244 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import Webcam from "react-webcam";
 import * as tf from "@tensorflow/tfjs";
 import "@tensorflow/tfjs-backend-webgl";
+import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 import { drawDetection } from "./drawUtil";
 
 export default function App() {
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
-  const [model, setModel] = useState(null);
-  const [gesture, setGesture] = useState("⏳ Loading...");
+  
+  // --- STATE ---
+  const [yoloModel, setYoloModel] = useState(null); // For visuals
+  const [mpLandmarker, setMpLandmarker] = useState(null); // For logic
+  const [gesture, setGesture] = useState("⏳ Loading Models...");
   const [text, setText] = useState("");
   const [dim, setDim] = useState({ w: 480, h: 360 });
 
-  // --- CONFIGURATION ---
-  const MODEL_PATH = 'best_web_model/model.json';
-  const INPUT_SIZE = 320; 
-  const CONFIDENCE_THRESHOLD = 0.80;
+  // --- CONFIG ---
+  const YOLO_PATH = 'best_web_model/model.json';
+  const INPUT_SIZE = 320;
+  const CONFIDENCE_THRESHOLD = 0.75;
+  const STABLE_THRESHOLD = 10;
 
   // --- REFS ---
-  const wasHandPresent = useRef(false);
-  const gestureBuffer = useRef([]); 
+  const gestureBuffer = useRef([]);
   const lastWrittenLetter = useRef("");
   const stableGesture = useRef("");
   const stableCount = useRef(0);
-  const STABLE_THRESHOLD = 10; 
-
-  // --- STATIC BOX REFS ---
+  
+  // Visual Refs (YOLO)
   const frozenBox = useRef(null);
   const lastBoxUpdate = useRef(0);
-  const BOX_REFRESH_RATE = 2000; 
+  const wasHandPresent = useRef(false);
 
-  // --- 1. LOAD MODEL ---
+  // --- 1. LOAD BOTH MODELS ---
   useEffect(() => {
-    const init = async () => {
+    const loadModels = async () => {
+      // A. Load Custom YOLO (Visuals)
       await tf.setBackend('webgl');
       await tf.ready();
-      const m = await tf.loadGraphModel(MODEL_PATH);
+      const loadedYolo = await tf.loadGraphModel(YOLO_PATH);
+      
+      // Warmup YOLO
       const dummy = tf.zeros([1, INPUT_SIZE, INPUT_SIZE, 3]);
-      await m.executeAsync(dummy);
+      await loadedYolo.executeAsync(dummy);
       dummy.dispose();
-      setModel(m);
+      setYoloModel(loadedYolo);
+
+      // B. Load MediaPipe (Logic)
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      );
+      const loadedMp = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU"
+        },
+        numHands: 1,
+        runningMode: "VIDEO",
+        minHandDetectionConfidence: 0.5
+      });
+      setMpLandmarker(loadedMp);
+
       setGesture("👀 Show Hand");
     };
-    init();
+    loadModels();
   }, []);
 
-  // --- 2. GESTURE LOGIC (A-Z) ---
-  // Note: This logic assumes a right hand in standard orientation.
-  // We will pass it un-mirrored data so the logic holds up.
-  const recognizeGesture = useCallback((keypoints) => {
-    if (!keypoints || keypoints.length < 21) return "";
-    const k = keypoints;
-    const d = (i1, i2) => Math.hypot(k[i1].x - k[i2].x, k[i1].y - k[i2].y);
-    const handSize = d(0, 9); 
-    const T = (factor) => handSize * factor; 
+  // --- 2. MEDIAPIPE LOGIC (High Performance 3D Math) ---
+const recognizeGestureMP = useCallback((mpLandmarks) => {
+    if (!mpLandmarks || mpLandmarks.length < 21) return "";
+    const k = mpLandmarks;
 
-    const thumbOpen = d(4, 17) > T(1.1); 
-    const indexOpen = d(8, 0) > T(1.2) && d(8, 5) > T(0.6);
-    const middleOpen = d(12, 0) > T(1.2) && d(12, 9) > T(0.6);
-    const ringOpen = d(16, 0) > T(1.2) && d(16, 13) > T(0.6);
-    const pinkyOpen = d(20, 0) > T(1.1) && d(20, 17) > T(0.6);
-    const fingersCount = (indexOpen ? 1 : 0) + (middleOpen ? 1 : 0) + (ringOpen ? 1 : 0) + (pinkyOpen ? 1 : 0);
-    const indexCurl = d(8, 0) < T(1.0); 
+    // 1. 3D Distance Helper (Depth-aware)
+    const d = (i1, i2) => Math.hypot(
+       k[i1].x - k[i2].x, 
+       k[i1].y - k[i2].y, 
+       (k[i1].z - k[i2].z) * 2
+    );
 
-    // 1. NO FINGERS UP -> A, E, M, N, S, T
-    if (fingersCount === 0) {
-        if (d(4, 10) < T(0.4) || d(4, 14) < T(0.4)) return "S";
-        if (d(4, 5) < T(0.4) && k[4].y < k[5].y) return "A";
-        if (d(8, 0) < T(0.8) && d(4, 13) < T(0.5)) return "E";
-        if (d(4, 14) < T(0.3) && d(4, 18) < T(0.3)) return "M";
-        if (d(4, 10) < T(0.3) && d(4, 14) < T(0.3)) return "N";
-        if (d(4, 5) < T(0.4) && d(4, 9) < T(0.4)) return "T";
-        return "E";
+    // 2. Reference Measurements
+    const handSize = d(0, 9); // Wrist to Middle Knuckle
+    
+    // 3. Finger States
+    // Tip must be significantly higher/further than knuckle to be "Open"
+    const isExtended = (tip, knuckle) => d(0, tip) > d(0, knuckle) * 1.1;
+
+    const indexOpen  = isExtended(8, 5);
+    const middleOpen = isExtended(12, 9);
+    const ringOpen   = isExtended(16, 13);
+    const pinkyOpen  = isExtended(20, 17);
+
+    // Thumb is special: Check distance to Pinky Knuckle (Reference point across palm)
+    // If far, thumb is out. If close, thumb is in.
+    const thumbOpen  = d(4, 17) > handSize * 0.5; 
+
+    // Count non-thumb fingers (Index to Pinky)
+    let count = [indexOpen, middleOpen, ringOpen, pinkyOpen].filter(Boolean).length;
+    
+    // Add Thumb to count if it's explicitly extended (like in '5' or 'L')
+    const totalCount = count + (thumbOpen ? 1 : 0);
+
+    // --- LOGIC TREE ---
+
+    // 
+
+    // === 5 FINGERS UP ===
+    if (totalCount === 5) {
+        // Fingers splayed? -> 5. Fingers together? -> B.
+        // Simple check: Distance between Index and Pinky tips
+        if (d(8, 20) < handSize * 0.6) return "B"; 
+        return "🖐️"; // 5 or Open Palm
     }
-    // 2. ONE FINGER UP -> D, L, X, Z, P, Q
-    if (fingersCount === 1 && indexOpen) {
-        if (thumbOpen) return "L";
-        if (d(8, 6) < T(0.4)) return "X";
-        if (k[8].y > k[5].y) return "Q"; 
-        return "D";
+
+    // === 4 FINGERS UP ===
+    if (totalCount === 4) {
+        // If thumb is tucked (count=4), it's B
+        if (!thumbOpen) return "B"; 
     }
-    // 3. ONE FINGER UP (Pinky) -> I, Y
-    if (fingersCount === 1 && pinkyOpen) {
-        if (d(4, 17) > T(1.1)) return "Y";
-        return "I";
+
+    // === 3 FINGERS UP ===
+    if (count === 3) {
+        // W: Index, Middle, Ring are up. Pinky down.
+        if (indexOpen && middleOpen && ringOpen && !pinkyOpen) return "W";
+        
+        // F: Middle, Ring, Pinky up. Index+Thumb touching (OK sign).
+        if (!indexOpen && d(4, 8) < handSize * 0.3) return "F";
     }
-    // 4. TWO FINGERS UP -> H, K, R, U, V, P
-    if (fingersCount === 2 && indexOpen && middleOpen) {
-        if (k[8].y > k[5].y) return "P";
-        const isHorizontal = Math.abs(k[8].x - k[0].x) > Math.abs(k[8].y - k[0].y);
-        if (isHorizontal) return "H";
-        if (d(8, 12) < T(0.3)) return "R";
-        if (d(8, 12) < T(0.5)) return "U";
-        if (d(8, 12) > T(0.6)) return "V";
-        if (k[4].y < k[5].y && k[4].y > k[8].y) return "K";
-        return "V";
+
+    // === 2 FINGERS UP ===
+    if (count === 2) {
+        // V / R / U: Index + Middle
+        if (indexOpen && middleOpen) {
+            // R: Crossed fingers (Index X > Middle X) (Assumes Right Hand/Mirror)
+            if (k[8].x > k[12].x) return "R"; 
+            
+            // U: Fingers held very close together
+            if (d(8, 12) < handSize * 0.25) return "U";
+
+            return "V";
+        }
+        
+        // Y: Thumb + Pinky (Hang loose)
+        if (thumbOpen && pinkyOpen) return "Y";
+        
+        // ILY (I Love You): Thumb + Index + Pinky
+        if (thumbOpen && indexOpen && pinkyOpen) return "🤟"; 
     }
-    // 5. THREE FINGERS UP -> W, F
-    if (indexOpen && middleOpen && ringOpen && !pinkyOpen) {
-        return "W";
+
+    // === 1 FINGER UP ===
+    if (count === 1) {
+        // L: Index + Thumb
+        if (indexOpen && thumbOpen) return "L";
+
+        // D: Index only (Thumb touches middle finger)
+        if (indexOpen) return "D";
+
+        // I: Pinky only
+        if (pinkyOpen) return "I";
     }
-    // 6. F / OK SIGN CHECK
-    if (d(4, 8) < T(0.5) && middleOpen && ringOpen && pinkyOpen) {
-        return "F";
+
+    // === 0 FINGERS (FISTS & CURVES) ===
+    if (count === 0) {
+        const thumbTip = k[4];
+        const indexTip = k[8];
+        const indexKnuckle = k[5];
+        const middleKnuckle = k[9];
+
+        // O: Thumb tip touches Index tip (making a hole)
+        if (d(4, 8) < handSize * 0.3) return "O";
+
+        // C: Hand forms a C (Thumb and fingers curved but not touching)
+        // Check if Thumb is "under" the Index finger vertically
+        if (d(4, 8) < handSize * 0.9 && d(4, 8) > handSize * 0.4) return "C";
+
+        // --- FIST VARIANTS (A, S, E, M, N, T) ---
+        // These depend on WHERE the thumb is crossing the fingers.
+        
+        // E: Thumb is curled low, touching tips of fingers (implied by 0 count)
+        // Hard to distinguish from S, but usually thumb tip is lower
+        if (thumbTip.y > indexKnuckle.y) return "E"; // Thumb is low
+
+        // A: Thumb is sticking out to the side (flush with palm)
+        // Check horizontal distance of thumb tip from index knuckle
+        if (Math.abs(thumbTip.x - indexKnuckle.x) > handSize * 0.2) return "A";
+
+        // T: Thumb tucked between Index and Middle
+        // Thumb X is between Index Knuckle and Middle Knuckle
+        if (thumbTip.x > indexKnuckle.x && thumbTip.x < middleKnuckle.x) return "T";
+
+        // S: Thumb wrapped over fingers (Default Fist)
+        return "S";
     }
-    // 7. O / C CHECK
-    if (!indexOpen && !middleOpen && !ringOpen && !pinkyOpen) {
-       if (d(8, 0) > T(0.9)) { 
-           if (d(4, 8) < T(0.4)) return "O";
-           return "C";
-       }
-    }
-    // 8. FOUR/FIVE FINGERS -> B, 5
-    if (indexOpen && middleOpen && ringOpen && pinkyOpen) {
-        if (d(4, 9) < T(0.6)) return "B";
-        return "🖐️"; 
-    }
-    // 9. G
-    if (!middleOpen && !ringOpen && !pinkyOpen) {
-        if (Math.abs(k[8].x - k[0].x) > Math.abs(k[8].y - k[0].y)) return "G";
-    }
+
     return "";
   }, []);
 
-  // --- 3. DETECTION LOOP ---
+  // --- 3. THE HYBRID LOOP ---
   const detect = useCallback(async () => {
-    if (!model || !webcamRef.current?.video) return;
+    if (!yoloModel || !mpLandmarker || !webcamRef.current?.video) return;
     const video = webcamRef.current.video;
     if (video.readyState !== 4) return;
 
-    // A. PREPARE INPUT
+    // ---------------------------------------------------------
+    // STEP A: RUN MEDIAPIPE (For the Brains/Text)
+    // ---------------------------------------------------------
+    const mpResult = mpLandmarker.detectForVideo(video, Date.now());
+    if (mpResult.landmarks && mpResult.landmarks.length > 0) {
+        // We use these High-Quality 3D points for the logic
+        const mpKeypoints = mpResult.landmarks[0]; 
+        const resultGesture = recognizeGestureMP(mpKeypoints);
+
+        // Update Text Buffer (Debouncing)
+        if (resultGesture) {
+            gestureBuffer.current.push(resultGesture);
+            if (gestureBuffer.current.length > 5) gestureBuffer.current.shift();
+            
+            // Simple frequency check
+            const counts = {}; let max = 0; let stable = resultGesture;
+            gestureBuffer.current.forEach(g => { counts[g]=(counts[g]||0)+1; if(counts[g]>max){max=counts[g]; stable=g;} });
+            
+            setGesture(stable);
+
+            if (stable === stableGesture.current) {
+                stableCount.current++;
+                if (stableCount.current > STABLE_THRESHOLD && stable.length === 1) {
+                    if (lastWrittenLetter.current !== stable) {
+                        setText(t => t + stable);
+                        lastWrittenLetter.current = stable;
+                    }
+                }
+            } else {
+                stableGesture.current = stable;
+                stableCount.current = 0;
+            }
+        }
+    }
+
+    // ---------------------------------------------------------
+    // STEP B: RUN CUSTOM YOLO (For the Visuals)
+    // ---------------------------------------------------------
     const input = tf.tidy(() => {
         return tf.browser.fromPixels(video)
           .resizeBilinear([INPUT_SIZE, INPUT_SIZE])
@@ -137,176 +247,109 @@ export default function App() {
           .expandDims(0);
     });
 
-    // B. INFERENCE & SHAPE HANDLING
-    let res = await model.executeAsync(input);
-    if (Array.isArray(res)) res = res[0];
-    const shape = res.shape;
-    let transRes, numChannels, numAnchors;
-    if (shape[1] < shape[2]) {
-        transRes = res.transpose([0, 2, 1]); 
-        numChannels = shape[1]; numAnchors = shape[2];
-    } else {
-        transRes = res; 
-        numChannels = shape[2]; numAnchors = shape[1];
-    }
-    const data = await transRes.data();
-    if(shape[1] < shape[2]) res.dispose();
-    transRes.dispose();
-    input.dispose();
+    let res = await yoloModel.executeAsync(input);
+    if (Array.isArray(res)) res = res[0]; // Handle array output
 
-    // C. FIND BEST DETECTION
+    // Parse YOLO Output (Transpose if needed)
+    let transRes;
+    const shape = res.shape;
+    if (shape[1] < shape[2]) {
+        transRes = res.transpose([0, 2, 1]); // [1, 8400, 56]
+    } else {
+        transRes = res;
+    }
+
+    const data = await transRes.data();
+    tf.dispose([res, transRes, input]); // Cleanup Tensors
+
+    // Find Best Box (NMS style logic)
     let maxScore = 0;
-    let bestRaw = null;
+    let bestIdx = -1;
+    const numAnchors = shape[1] < shape[2] ? shape[2] : shape[1];
+    const numChannels = shape[1] < shape[2] ? shape[1] : shape[2];
+
     for (let i = 0; i < numAnchors; i++) {
-        const offset = i * numChannels;
-        const score = data[offset + 4];
+        const score = data[i * numChannels + 4];
         if (score > CONFIDENCE_THRESHOLD && score > maxScore) {
             maxScore = score;
-            bestRaw = { offset, score };
+            bestIdx = i * numChannels;
         }
     }
 
-    // D. PROCESS RESULT
     let liveDetection = null;
 
-    if (bestRaw) {
+    if (bestIdx >= 0) {
         wasHandPresent.current = true;
         const scaleX = dim.w / INPUT_SIZE;
         const scaleY = dim.h / INPUT_SIZE;
-        const { offset, score } = bestRaw;
 
-        // --- 1. Calculate Raw (Unmirrored) Data ---
-        // We use this for gesture recognition so right/left logic remains correct relative to the hand itself.
+        // Extract YOLO Keypoints
         const rawKeypoints = [];
         for (let k = 0; k < 21; k++) {
-            const kIdx = offset + 5 + (k * 3);
-            rawKeypoints.push({
-                x: data[kIdx] * scaleX,
-                y: data[kIdx + 1] * scaleY,
-                score: data[kIdx + 2]
-            });
+            const x = data[bestIdx + 5 + (k * 3)] * scaleX;
+            const y = data[bestIdx + 5 + (k * 3) + 1] * scaleY;
+            rawKeypoints.push({ x: dim.w - x, y: y }); // Mirror X
         }
 
-        const rawBx = data[offset];     // center x
-        const rawBy = data[offset + 1]; // center y
-        const rawBw = data[offset + 2]; // width
-        const rawBh = data[offset + 3]; // height
-        
-        // Calculate scaled box dimensions
-        const boxW = rawBw * scaleX;
-        const boxH = rawBh * scaleY;
-        // Calculate unmirrored top-left X and Y
-        const boxX_unmirrored = (rawBx * scaleX) - (boxW / 2);
-        const boxY = (rawBy * scaleY) - (boxH / 2);
+        // Extract YOLO Box
+        const bx = data[bestIdx];
+        const by = data[bestIdx + 1];
+        const bw = data[bestIdx + 2];
+        const bh = data[bestIdx + 3];
 
-        // --- 2. Create Mirrored Data for Drawing ---
-        // === MIRRORING ADJUSTMENT START ===
-        // Since the webcam view is mirrored, we flip X coordinates for drawing.
-        
-        // Flip Keypoints
-        const drawingKeypoints = rawKeypoints.map(kp => ({
-            ...kp,
-            x: dim.w - kp.x // Flip X across canvas width
-        }));
+        const boxW = bw * scaleX;
+        const boxH = bh * scaleY;
+        const boxX = (dim.w - (bx * scaleX)) - (boxW / 2); // Mirror Box X
+        const boxY = (by * scaleY) - (boxH / 2);
 
-        // Flip Box X coordinate: NewX = CanvasWidth - OriginalX - BoxWidth
-        const boxX_mirrored = dim.w - boxX_unmirrored - boxW;
-        const drawingBox = [ boxX_mirrored, boxY, boxW, boxH ];
-        // === MIRRORING ADJUSTMENT END ===
+        // Stabilize Box (Your Custom Logic)
+        const currentBox = [boxX, boxY, boxW, boxH];
+        liveDetection = { keypoints: rawKeypoints, score: maxScore, box: currentBox };
 
-        // Prepare object for drawing utility using MIRRORED data
-        liveDetection = { keypoints: drawingKeypoints, score, box: drawingBox };
-
-        // --- 3. STATIC BOX LOGIC ---
         const now = Date.now();
-        if (now - lastBoxUpdate.current > BOX_REFRESH_RATE || !frozenBox.current) {
-            // Use the MIRRORED box for the static drawing
-            frozenBox.current = drawingBox;
+        if (now - lastBoxUpdate.current > 500 || !frozenBox.current) {
+            frozenBox.current = currentBox;
             lastBoxUpdate.current = now;
-        }
-
-        // --- 4. RECOGNIZE GESTURE (Use RAW/UNMIRRORED data) ---
-        const rawGesture = recognizeGesture(rawKeypoints);
-        
-        // --- 5. STABILIZATION & TYPING ---
-        if (rawGesture) {
-            gestureBuffer.current.push(rawGesture);
-            if (gestureBuffer.current.length > 5) gestureBuffer.current.shift();
-            const counts = {}; let maxCount = 0; let stableG = rawGesture;
-            gestureBuffer.current.forEach(g => {
-                counts[g] = (counts[g] || 0) + 1;
-                if(counts[g] > maxCount) { maxCount = counts[g]; stableG = g; }
-            });
-            setGesture(stableG);
-
-            if (stableG === stableGesture.current) stableCount.current += 1;
-            else { stableGesture.current = stableG; stableCount.current = 0; }
-
-            if (stableCount.current > STABLE_THRESHOLD && stableG !== "🖐️" && stableG.length === 1) {
-                if (lastWrittenLetter.current !== stableG) {
-                    setText(prev => prev + stableG);
-                    lastWrittenLetter.current = stableG;
-                }
-            }
         }
     } else {
         if (wasHandPresent.current) {
-            wasHandPresent.current = false;
-            frozenBox.current = null;
-            setGesture("👀 Show Hand");
+             wasHandPresent.current = false;
+             frozenBox.current = null;
         }
     }
 
-    // E. DRAW (Pass mirrored data)
+    // Draw using CUSTOM MODEL data
     const ctx = canvasRef.current.getContext("2d");
     drawDetection(ctx, liveDetection, frozenBox.current, dim);
 
-  }, [model, dim, recognizeGesture]);
+  }, [yoloModel, mpLandmarker, dim, recognizeGestureMP]);
 
-  // --- 4. LOOP ---
+  // --- LOOP ---
   useEffect(() => {
-    if(!model) return;
-    let raf;
-    const loop = () => { detect(); raf = requestAnimationFrame(loop); };
-    loop();
-    return () => cancelAnimationFrame(raf);
-  }, [model, detect]);
+    if (!yoloModel || !mpLandmarker) return;
+    const interval = setInterval(detect, 50); // Cap at 20fps to save CPU
+    return () => clearInterval(interval);
+  }, [yoloModel, mpLandmarker, detect]);
 
-  // --- KEYBOARD HANDLERS ---
-  const handleSpace = () => setText(t => t + " ");
-  const handleClear = () => setText("");
-  const handleBackspace = () => setText(t => t.slice(0, -1));
-
+  // --- UI RENDER ---
   return (
-    <div style={{ background: "#ede7e7", minHeight: "100vh", padding: "20px", display: "flex", flexDirection: "column", alignItems: "center" }}>
-      <h1 style={{ color: "#333", marginBottom: "10px" }}>Sign Language Detector</h1>
-      <h2 style={{ fontSize: "3rem", color: "#2b9308", margin: "10px 0" }}>{gesture}</h2>
-      <div style={{ width: "90%", maxWidth: "500px", padding: "15px", background: "white", borderRadius: "8px", border: "2px solid #ccc", minHeight: "60px", fontSize: "1.5rem", marginBottom: "20px", display:"flex", alignItems:"center", justifyContent:"center" }}>
-        {text || <span style={{color: "#ccc"}}>Text will appear here...</span>}
+    <div style={{ background: "#ede7e7", minHeight: "100vh", padding: "20px", display: "flex", flexDirection: "column", alignItems: "center", fontFamily: "sans-serif" }}>
+      <h1>ASL Detector (Hybrid Engine)</h1>
+      <h2 style={{ fontSize: "3rem", color: "#2b9308" }}>{gesture}</h2>
+      
+      <div style={{ width: "90%", padding: "15px", background: "white", fontSize: "1.5rem", marginBottom: "20px", border: "1px solid #ccc" }}>
+        {text || "Start signing..."}
       </div>
-      <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
-        <button onClick={handleSpace} style={btnStyle}>SPACE</button>
-        <button onClick={handleBackspace} style={{...btnStyle, background:"orange"}}>BACK</button>
-        <button onClick={handleClear} style={{...btnStyle, background:"red"}}>CLEAR</button>
+
+      <div style={{ position: "relative", width: dim.w, height: dim.h, border: "4px solid #333", borderRadius: "10px", overflow: "hidden" }}>
+        <Webcam ref={webcamRef} width={dim.w} height={dim.h} mirrored={true} style={{ width: "100%", height: "100%", objectFit:"cover" }} />
+        <canvas ref={canvasRef} width={dim.w} height={dim.h} style={{ position: "absolute", top: 0, left: 0 }} />
       </div>
-      {/* Ensure Webcam is mirrored AND Canvas is exactly on top */}
-      <div style={{ position: "relative", width: dim.w, height: dim.h, borderRadius: "12px", overflow: "hidden", border: "4px solid #333", boxShadow: "0 10px 20px rgba(0,0,0,0.3)" }}>
-        <Webcam 
-            ref={webcamRef} 
-            width={dim.w} 
-            height={dim.h} 
-            mirrored={true} // Visual mirroring
-            style={{ width: "100%", height: "100%", objectFit: "cover" }} 
-        />
-        <canvas 
-            ref={canvasRef} 
-            width={dim.w} 
-            height={dim.h} 
-            style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} // Canvas on top
-        />
+
+       <div style={{marginTop: "20px"}}>
+         <button onClick={() => setText(t => t + " ")}>SPACE</button>
+         <button onClick={() => setText("")} style={{marginLeft: "10px"}}>CLEAR</button>
       </div>
     </div>
   );
 }
-
-const btnStyle = { padding: "10px 20px", borderRadius: "6px", border: "none", background: "#333", color: "white", fontWeight: "bold", cursor: "pointer", fontSize: "1rem" };
