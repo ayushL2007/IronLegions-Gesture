@@ -1,38 +1,193 @@
-.App {
-  text-align: center;
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+
+body {
+  margin: 0;
+  font-family: 'Inter', sans-serif;
+  color: #333;
+  /* Winter background */
+  background: url('https://images.unsplash.com/photo-1491002052546-bf38f186af56?q=80&w=2083&auto=format&fit=crop') no-repeat center center fixed;
+  background-size: cover;
+  overflow-x: hidden; /* Prevent horizontal scrollbar from wide snowflakes */
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+/* --- SNOWFALL ANIMATION --- */
+.snow-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none; /* Clicks pass through the snow */
+  z-index: 9999; /* Sit on top of everything except maybe modals */
+  overflow: hidden;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+.snowflake {
+  position: absolute;
+  top: -20px;
+  color: #fff;
+  user-select: none;
+  animation-name: fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
+@keyframes fall {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(105vh); }
+}
+
+/* --- MAIN LAYOUT --- */
+.app-container {
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-height: 100vh;
+  padding: 40px 20px;
+  /* Glassmorphism tint */
+  background-color: rgba(255, 255, 255, 0.3); 
+  backdrop-filter: blur(3px); 
+  position: relative; 
+  z-index: 1; /* Content sits below snow visually if snow z-index is higher, or above if we want snow behind. */
+}
+/* Let's make snow sit BEHIND the control panels but IN FRONT of the background */
+/* Update: To make it look immersive, z-index: 0 for container, fixed snow at -1? */
+/* Actually, standard is snow ON TOP usually looks best for "atmosphere". Kept snow at 9999 pointer-events:none */
+
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 30px;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 10px 20px;
+  border-radius: 20px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+  z-index: 10;
+}
+
+.logo {
+  height: 50px;
+  width: auto;
+  border-radius: 8px;
+}
+
+.app-title {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: #2c3e50;
+  letter-spacing: -1px;
+  margin: 0;
+}
+
+.display-area {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  z-index: 10;
+}
+
+.gesture-status {
+  font-size: 3.5rem;
+  font-weight: 700;
+  color: #27ae60;
+  margin: 0;
+  min-height: 80px;
+  text-shadow: 0 4px 15px rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.6);
+  padding: 0 20px;
+  border-radius: 15px;
+}
+
+.text-output {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 18px 24px;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+  font-size: 1.5rem;
+  font-weight: 500;
+  color: #34495e;
+  min-height: 60px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-sizing: border-box;
+}
+
+.text-output.placeholder {
+  color: #95a5a6;
+  font-style: italic;
+}
+
+.camera-wrapper {
+  position: relative;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+  border: 5px solid rgba(255, 255, 255, 0.8);
+  background: #000;
+}
+
+.webcam-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.drawing-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.controls {
+  margin-top: 25px;
+  display: flex;
+  gap: 10px;
+  width: 100%;
   justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+  flex-wrap: wrap; 
 }
 
-.App-link {
-  color: #61dafb;
+.btn {
+  padding: 12px 16px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all 0.2s ease;
+  flex: 1; 
+  min-width: 80px;
+  max-width: 120px; 
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 15px rgba(0,0,0,0.2);
+}
+
+.btn:active {
+  transform: scale(0.96);
+}
+
+.btn-primary { background-color: #2c3e50; color: white; }
+.btn-warning { background-color: #e67e22; color: white; }
+.btn-speak   { background-color: #8e44ad; color: white; }
+.btn-danger  { background-color: #c0392b; color: white; }
+
+@media (max-width: 600px) {
+  .app-title { font-size: 2rem; }
+  .gesture-status { font-size: 2.5rem; }
+  .controls { width: 100%; gap: 8px; }
+  .btn { padding: 12px 10px; font-size: 0.8rem; }
 }
