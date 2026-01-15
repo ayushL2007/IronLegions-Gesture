@@ -1,393 +1,312 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import Webcam from "react-webcam";
-import * as handPoseDetection from "@tensorflow-models/hand-pose-detection";
-import * as tf from "@tensorflow/tfjs-core";
+import * as tf from "@tensorflow/tfjs";
 import "@tensorflow/tfjs-backend-webgl";
+import { drawDetection } from "./drawUtil";
 
 export default function App() {
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
-  const [detector, setDetector] = useState(null);
+  const [model, setModel] = useState(null);
   const [gesture, setGesture] = useState("⏳ Loading...");
   const [text, setText] = useState("");
   const [dim, setDim] = useState({ w: 480, h: 360 });
 
+  // --- CONFIGURATION ---
+  const MODEL_PATH = 'best_web_model/model.json';
+  const INPUT_SIZE = 320; 
+  const CONFIDENCE_THRESHOLD = 0.80;
+
+  // --- REFS ---
+  const wasHandPresent = useRef(false);
+  const gestureBuffer = useRef([]); 
   const lastWrittenLetter = useRef("");
   const stableGesture = useRef("");
   const stableCount = useRef(0);
-  const STABLE_THRESHOLD = 15;
+  const STABLE_THRESHOLD = 10; 
 
-  const wasHandPresent = useRef(false);
-  const gestureBuffer = useRef([]);
-  const BUFFER_SIZE = 10;
+  // --- STATIC BOX REFS ---
+  const frozenBox = useRef(null);
+  const lastBoxUpdate = useRef(0);
+  const BOX_REFRESH_RATE = 2000; 
 
-  const THEME_COLOR = "#FFFFC5";
-  const THEME_RGB = "255, 255, 197";
-
-  // --- KEYBOARD & TTS ---
+  // --- 1. LOAD MODEL ---
   useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (event.key === "Backspace") {
-        setText((prev) => prev.slice(0, -1));
-        lastWrittenLetter.current = "";
-      } else if (event.key === "Escape") {
-        setText("");
-        lastWrittenLetter.current = "";
-      } else if (event.key === " ") {
-        setText((prev) => prev + " ");
-        lastWrittenLetter.current = "";
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
-  const speakText = () => {
-    if (!text) return;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1;
-    window.speechSynthesis.speak(utterance);
-  };
-
-  // --- RESPONSIVE DIMENSIONS ---
-  useEffect(() => {
-    const updateDimensions = () => {
-      const screenW = window.innerWidth;
-      const screenH = window.innerHeight;
-      const isPortrait = screenH > screenW;
-      let w, h;
-      if (isPortrait) {
-        w = Math.min(screenW - 20, 480);
-        h = w * 1.333;
-      } else {
-        w = Math.min(screenW - 40, 480);
-        h = w * 0.75;
-      }
-      setDim({ w: Math.round(w), h: Math.round(h) });
-    };
-    updateDimensions();
-    window.addEventListener("resize", updateDimensions);
-    window.addEventListener("orientationchange", updateDimensions);
-    return () => {
-      window.removeEventListener("resize", updateDimensions);
-      window.removeEventListener("orientationchange", updateDimensions);
-    };
-  }, []);
-
-  // --- TF MODEL INIT ---
-  useEffect(() => {
-    (async () => {
+    const init = async () => {
+      await tf.setBackend('webgl');
       await tf.ready();
-      await tf.setBackend("webgl");
-      const d = await handPoseDetection.createDetector(
-        handPoseDetection.SupportedModels.MediaPipeHands,
-        { runtime: "tfjs", modelType: "full", maxHands: 1 }
-      );
-      setDetector(d);
+      const m = await tf.loadGraphModel(MODEL_PATH);
+      const dummy = tf.zeros([1, INPUT_SIZE, INPUT_SIZE, 3]);
+      await m.executeAsync(dummy);
+      dummy.dispose();
+      setModel(m);
       setGesture("👀 Show Hand");
-    })();
+    };
+    init();
   }, []);
 
-  // --- GESTURE LOGIC ---
-  const recognizeGesture = useCallback((hand) => {
-    const k = hand.keypoints;
-    const handSize = Math.hypot(k[9].x - k[0].x, k[9].y - k[0].y);
-    const T = (factor) => handSize * factor;
-
-    // Helper: Distance from tip to knuckle is large (Finger extended)
-    const isExtended = (tipIdx, mcpIdx) => {
-        const dist = Math.hypot(k[tipIdx].x - k[mcpIdx].x, k[tipIdx].y - k[mcpIdx].y);
-        return dist > T(0.55);
-    };
-
-    const indexExt = isExtended(8, 5);
-    const middleExt = isExtended(12, 9);
-    const ringExt = isExtended(16, 13);
-    const pinkyExt = isExtended(20, 17);
-
-    // Helper: Distance between two keypoints
+  // --- 2. GESTURE LOGIC (A-Z) ---
+  // Note: This logic assumes a right hand in standard orientation.
+  // We will pass it un-mirrored data so the logic holds up.
+  const recognizeGesture = useCallback((keypoints) => {
+    if (!keypoints || keypoints.length < 21) return "";
+    const k = keypoints;
     const d = (i1, i2) => Math.hypot(k[i1].x - k[i2].x, k[i1].y - k[i2].y);
+    const handSize = d(0, 9); 
+    const T = (factor) => handSize * factor; 
 
-    // Check Orientation
-    const pointingDown = k[8].y > k[0].y; 
+    const thumbOpen = d(4, 17) > T(1.1); 
+    const indexOpen = d(8, 0) > T(1.2) && d(8, 5) > T(0.6);
+    const middleOpen = d(12, 0) > T(1.2) && d(12, 9) > T(0.6);
+    const ringOpen = d(16, 0) > T(1.2) && d(16, 13) > T(0.6);
+    const pinkyOpen = d(20, 0) > T(1.1) && d(20, 17) > T(0.6);
+    const fingersCount = (indexOpen ? 1 : 0) + (middleOpen ? 1 : 0) + (ringOpen ? 1 : 0) + (pinkyOpen ? 1 : 0);
+    const indexCurl = d(8, 0) < T(1.0); 
 
-    // --- LOGIC TREE ---
-
-    // 1. DOWNWARD GROUP (P, Q)
-    if (pointingDown) {
-        if (indexExt && !middleExt && !ringExt && !pinkyExt) {
-             if (d(4, 8) > T(0.6)) return "Q";
-        }
-        if (indexExt && middleExt && !ringExt && !pinkyExt) {
-             return "P"; 
-        }
+    // 1. NO FINGERS UP -> A, E, M, N, S, T
+    if (fingersCount === 0) {
+        if (d(4, 10) < T(0.4) || d(4, 14) < T(0.4)) return "S";
+        if (d(4, 5) < T(0.4) && k[4].y < k[5].y) return "A";
+        if (d(8, 0) < T(0.8) && d(4, 13) < T(0.5)) return "E";
+        if (d(4, 14) < T(0.3) && d(4, 18) < T(0.3)) return "M";
+        if (d(4, 10) < T(0.3) && d(4, 14) < T(0.3)) return "N";
+        if (d(4, 5) < T(0.4) && d(4, 9) < T(0.4)) return "T";
+        return "E";
     }
-
-    // 2. HORIZONTAL GROUP (G, H)
-    const isHorizontal = Math.abs(k[8].x - k[5].x) > Math.abs(k[8].y - k[5].y) * 1.5;
-    if (isHorizontal && !ringExt && !pinkyExt) {
-        if (middleExt) return "H";
-        return "G";
+    // 2. ONE FINGER UP -> D, L, X, Z, P, Q
+    if (fingersCount === 1 && indexOpen) {
+        if (thumbOpen) return "L";
+        if (d(8, 6) < T(0.4)) return "X";
+        if (k[8].y > k[5].y) return "Q"; 
+        return "D";
     }
-
-    // 3. SINGLE FINGER GROUP (D, L)
-    if (!middleExt && !ringExt && !pinkyExt) {
-        if (indexExt) {
-             if (d(4, 5) > T(0.9)) return "L"; 
-             return "D";
-        }
-    }
-
-    // 4. TWO FINGER GROUP (U, V, R, K)
-    if (indexExt && middleExt && !ringExt && !pinkyExt) {
-        if (Math.abs(k[8].x - k[12].x) < T(0.25)) return "R"; 
-
-        // K CHECK
-        const thumbY = k[4].y;
-        const middleKnuckleY = k[9].y;
-        if (thumbY < middleKnuckleY + T(0.2)) {
-             return "K";
-        }
-
-        if (d(8, 12) > T(0.45)) return "V";
-        return "U";
-    }
-
-    // 5. OPEN HAND / W / F / B 
-    if (indexExt && middleExt && ringExt) {
-        if (pinkyExt) {
-            // (Note: C check removed from here to prevent false positives)
-            if (d(4, 17) < T(1.0)) return "B"; 
-            return "🖐️";
-        }
-        return "W";
-    }
-
-    // F Check (Circle)
-    if (!indexExt && middleExt && ringExt && pinkyExt) {
-         if (d(4, 8) < T(0.5)) return "F";
-    }
-
-    // 6. PINKY GROUP (I, Y)
-    if (!indexExt && !middleExt && !ringExt && pinkyExt) {
+    // 3. ONE FINGER UP (Pinky) -> I, Y
+    if (fingersCount === 1 && pinkyOpen) {
         if (d(4, 17) > T(1.1)) return "Y";
         return "I";
     }
-
-    // 7. FIST GROUP (A, C, E, M, N, S, T, O)
-    // Fingers are NOT fully extended
-    if (!indexExt && !middleExt && !ringExt && !pinkyExt) {
-        
-        // ** C CHECK ( STRICT ) **
-        // 1. Index finger is NOT tight (it has a curve). Length between Tip and Knuckle is "Medium".
-        // 2. Gap between Thumb and Index is "Medium" (Not touching like O, not wide like L).
-        const indexLen = d(8, 5);
-        const gap = d(4, 8);
-        
-        // "Medium Curve": Not a fist (<0.5) and not straight (>0.85)
-        const isCurved = indexLen > T(0.55) && indexLen < T(0.85);
-        // "Medium Gap": Not touching (<0.5) and not fully open (>0.9)
-        const hasGap = gap > T(0.5) && gap < T(0.9);
-
-        if (isCurved && hasGap) {
-             return "C";
-        }
-
-        // ** E vs O / S / A Logic **
-        const indexCurl = d(8, 5);
-        
-        // O Check (Thumb touching Index AND Index is Arched)
-        if (d(4, 8) < T(0.5)) {
-             if (indexCurl < T(0.35)) {
-                 if (d(4, 10) < T(0.35)) return "S";
-                 return "E"; 
-             }
-             return "O";
-        }
-
-        // A Check
-        if (d(4, 5) > T(0.5) && k[4].y < k[5].y) return "A";
-        
-        // M, N, T Logic
-        const dIndex = d(4, 5);  
-        const dMiddle = d(4, 9); 
-        const dRing = d(4, 13);  
-        const dPinky = d(4, 17); 
-
-        if (dRing < T(0.3) || dPinky < T(0.35)) return "M";
-        if (dMiddle < T(0.3)) return "N";
-        if (dIndex < T(0.35)) return "T";
-
-        // Fallback for tight E detection
-        if (indexCurl < T(0.35) && d(4, 13) < T(0.5)) return "E";
-
-        return "S"; 
+    // 4. TWO FINGERS UP -> H, K, R, U, V, P
+    if (fingersCount === 2 && indexOpen && middleOpen) {
+        if (k[8].y > k[5].y) return "P";
+        const isHorizontal = Math.abs(k[8].x - k[0].x) > Math.abs(k[8].y - k[0].y);
+        if (isHorizontal) return "H";
+        if (d(8, 12) < T(0.3)) return "R";
+        if (d(8, 12) < T(0.5)) return "U";
+        if (d(8, 12) > T(0.6)) return "V";
+        if (k[4].y < k[5].y && k[4].y > k[8].y) return "K";
+        return "V";
     }
-
-    return "🖐️";
+    // 5. THREE FINGERS UP -> W, F
+    if (indexOpen && middleOpen && ringOpen && !pinkyOpen) {
+        return "W";
+    }
+    // 6. F / OK SIGN CHECK
+    if (d(4, 8) < T(0.5) && middleOpen && ringOpen && pinkyOpen) {
+        return "F";
+    }
+    // 7. O / C CHECK
+    if (!indexOpen && !middleOpen && !ringOpen && !pinkyOpen) {
+       if (d(8, 0) > T(0.9)) { 
+           if (d(4, 8) < T(0.4)) return "O";
+           return "C";
+       }
+    }
+    // 8. FOUR/FIVE FINGERS -> B, 5
+    if (indexOpen && middleOpen && ringOpen && pinkyOpen) {
+        if (d(4, 9) < T(0.6)) return "B";
+        return "🖐️"; 
+    }
+    // 9. G
+    if (!middleOpen && !ringOpen && !pinkyOpen) {
+        if (Math.abs(k[8].x - k[0].x) > Math.abs(k[8].y - k[0].y)) return "G";
+    }
+    return "";
   }, []);
 
-  // --- DETECTION LOOP ---
+  // --- 3. DETECTION LOOP ---
   const detect = useCallback(async () => {
-    if (!detector || !webcamRef.current?.video) return;
+    if (!model || !webcamRef.current?.video) return;
     const video = webcamRef.current.video;
     if (video.readyState !== 4) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    
-    // Set Dimensions
-    canvas.width = dim.w;
-    canvas.height = dim.h;
-    ctx.clearRect(0, 0, dim.w, dim.h);
 
-    const hands = await detector.estimateHands(video, { flipHorizontal: true });
+    // A. PREPARE INPUT
+    const input = tf.tidy(() => {
+        return tf.browser.fromPixels(video)
+          .resizeBilinear([INPUT_SIZE, INPUT_SIZE])
+          .div(255.0)
+          .expandDims(0);
+    });
 
-    if (hands.length > 0) {
-      wasHandPresent.current = true;
-      const hand = hands[0];
-      const rawGesture = recognizeGesture(hand);
-      
-      // Smoothing Buffer
-      gestureBuffer.current.push(rawGesture);
-      if (gestureBuffer.current.length > BUFFER_SIZE) gestureBuffer.current.shift();
-      const counts = {};
-      let maxCount = 0;
-      let smoothedGesture = rawGesture;
-      gestureBuffer.current.forEach((g) => {
-        counts[g] = (counts[g] || 0) + 1;
-        if (counts[g] > maxCount) {
-          maxCount = counts[g];
-          smoothedGesture = g;
-        }
-      });
-      setGesture(smoothedGesture);
-
-      // Stability Check
-      if (smoothedGesture === stableGesture.current) {
-        stableCount.current += 1;
-      } else {
-        stableGesture.current = smoothedGesture;
-        stableCount.current = 1;
-      }
-
-      // Typing Logic
-      if (stableCount.current >= STABLE_THRESHOLD) {
-        if (smoothedGesture !== "🖐️" && smoothedGesture !== "👀 Show Hand") {
-          if (smoothedGesture !== lastWrittenLetter.current) {
-            setText((t) => t + smoothedGesture);
-            lastWrittenLetter.current = smoothedGesture;
-          }
-        } else {
-           lastWrittenLetter.current = "";
-        }
-      }
-
-      // Draw Keypoints
-      ctx.fillStyle = THEME_COLOR;
-      hand.keypoints.forEach((p) => {
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-        ctx.fill();
-      });
+    // B. INFERENCE & SHAPE HANDLING
+    let res = await model.executeAsync(input);
+    if (Array.isArray(res)) res = res[0];
+    const shape = res.shape;
+    let transRes, numChannels, numAnchors;
+    if (shape[1] < shape[2]) {
+        transRes = res.transpose([0, 2, 1]); 
+        numChannels = shape[1]; numAnchors = shape[2];
     } else {
-      // Hand Left Frame -> Add Space
-      setGesture("👀 Show Hand");
-      stableCount.current = 0;
-      lastWrittenLetter.current = "";
-      if (wasHandPresent.current) {
-        setText((prev) => (prev.length > 0 && !prev.endsWith(" ") ? prev + " " : prev));
-        wasHandPresent.current = false;
-      }
+        transRes = res; 
+        numChannels = shape[2]; numAnchors = shape[1];
     }
-  }, [detector, recognizeGesture, dim]);
+    const data = await transRes.data();
+    if(shape[1] < shape[2]) res.dispose();
+    transRes.dispose();
+    input.dispose();
 
+    // C. FIND BEST DETECTION
+    let maxScore = 0;
+    let bestRaw = null;
+    for (let i = 0; i < numAnchors; i++) {
+        const offset = i * numChannels;
+        const score = data[offset + 4];
+        if (score > CONFIDENCE_THRESHOLD && score > maxScore) {
+            maxScore = score;
+            bestRaw = { offset, score };
+        }
+    }
+
+    // D. PROCESS RESULT
+    let liveDetection = null;
+
+    if (bestRaw) {
+        wasHandPresent.current = true;
+        const scaleX = dim.w / INPUT_SIZE;
+        const scaleY = dim.h / INPUT_SIZE;
+        const { offset, score } = bestRaw;
+
+        // --- 1. Calculate Raw (Unmirrored) Data ---
+        // We use this for gesture recognition so right/left logic remains correct relative to the hand itself.
+        const rawKeypoints = [];
+        for (let k = 0; k < 21; k++) {
+            const kIdx = offset + 5 + (k * 3);
+            rawKeypoints.push({
+                x: data[kIdx] * scaleX,
+                y: data[kIdx + 1] * scaleY,
+                score: data[kIdx + 2]
+            });
+        }
+
+        const rawBx = data[offset];     // center x
+        const rawBy = data[offset + 1]; // center y
+        const rawBw = data[offset + 2]; // width
+        const rawBh = data[offset + 3]; // height
+        
+        // Calculate scaled box dimensions
+        const boxW = rawBw * scaleX;
+        const boxH = rawBh * scaleY;
+        // Calculate unmirrored top-left X and Y
+        const boxX_unmirrored = (rawBx * scaleX) - (boxW / 2);
+        const boxY = (rawBy * scaleY) - (boxH / 2);
+
+        // --- 2. Create Mirrored Data for Drawing ---
+        // === MIRRORING ADJUSTMENT START ===
+        // Since the webcam view is mirrored, we flip X coordinates for drawing.
+        
+        // Flip Keypoints
+        const drawingKeypoints = rawKeypoints.map(kp => ({
+            ...kp,
+            x: dim.w - kp.x // Flip X across canvas width
+        }));
+
+        // Flip Box X coordinate: NewX = CanvasWidth - OriginalX - BoxWidth
+        const boxX_mirrored = dim.w - boxX_unmirrored - boxW;
+        const drawingBox = [ boxX_mirrored, boxY, boxW, boxH ];
+        // === MIRRORING ADJUSTMENT END ===
+
+        // Prepare object for drawing utility using MIRRORED data
+        liveDetection = { keypoints: drawingKeypoints, score, box: drawingBox };
+
+        // --- 3. STATIC BOX LOGIC ---
+        const now = Date.now();
+        if (now - lastBoxUpdate.current > BOX_REFRESH_RATE || !frozenBox.current) {
+            // Use the MIRRORED box for the static drawing
+            frozenBox.current = drawingBox;
+            lastBoxUpdate.current = now;
+        }
+
+        // --- 4. RECOGNIZE GESTURE (Use RAW/UNMIRRORED data) ---
+        const rawGesture = recognizeGesture(rawKeypoints);
+        
+        // --- 5. STABILIZATION & TYPING ---
+        if (rawGesture) {
+            gestureBuffer.current.push(rawGesture);
+            if (gestureBuffer.current.length > 5) gestureBuffer.current.shift();
+            const counts = {}; let maxCount = 0; let stableG = rawGesture;
+            gestureBuffer.current.forEach(g => {
+                counts[g] = (counts[g] || 0) + 1;
+                if(counts[g] > maxCount) { maxCount = counts[g]; stableG = g; }
+            });
+            setGesture(stableG);
+
+            if (stableG === stableGesture.current) stableCount.current += 1;
+            else { stableGesture.current = stableG; stableCount.current = 0; }
+
+            if (stableCount.current > STABLE_THRESHOLD && stableG !== "🖐️" && stableG.length === 1) {
+                if (lastWrittenLetter.current !== stableG) {
+                    setText(prev => prev + stableG);
+                    lastWrittenLetter.current = stableG;
+                }
+            }
+        }
+    } else {
+        if (wasHandPresent.current) {
+            wasHandPresent.current = false;
+            frozenBox.current = null;
+            setGesture("👀 Show Hand");
+        }
+    }
+
+    // E. DRAW (Pass mirrored data)
+    const ctx = canvasRef.current.getContext("2d");
+    drawDetection(ctx, liveDetection, frozenBox.current, dim);
+
+  }, [model, dim, recognizeGesture]);
+
+  // --- 4. LOOP ---
   useEffect(() => {
-    if (!detector) return;
+    if(!model) return;
     let raf;
-    const loop = () => {
-      detect();
-      raf = requestAnimationFrame(loop);
-    };
+    const loop = () => { detect(); raf = requestAnimationFrame(loop); };
     loop();
     return () => cancelAnimationFrame(raf);
-  }, [detector, detect]);
+  }, [model, detect]);
+
+  // --- KEYBOARD HANDLERS ---
+  const handleSpace = () => setText(t => t + " ");
+  const handleClear = () => setText("");
+  const handleBackspace = () => setText(t => t.slice(0, -1));
 
   return (
-    <div style={{ background: "#ede7e7ff", minHeight: "100vh", color: "#210303ff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start", padding: "15px", boxSizing: "border-box", overflowX: "hidden" }}>
-      {/* NAVBAR */}
-<div
-  style={{
-    width: "100%",
-    maxWidth: "900px",
-    marginBottom: "15px",
-    padding: "10px 16px",
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    borderRadius: "16px",
-    background: "rgba(255, 255, 255, 0.25)",
-    backdropFilter: "blur(12px)",
-    WebkitBackdropFilter: "blur(12px)",
-    border: "1px solid rgba(255, 255, 255, 0.3)",
-    boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-  }}
->
-  <img
-    src={process.env.PUBLIC_URL + "logo.jpg"}
-    alt="Signetic Logo"
-    style={{
-      width: "40px",
-      height: "40px",
-      objectFit: "contain",
-    }}
-  />
-
-  <span
-    style={{
-      marginLeft: "auto",
-      fontSize: "clamp(1rem, 4vw, 1.2rem)",
-      fontWeight: "700",
-      color: "#272704ff",
-      letterSpacing: "0.5px",
-      padding: "6px 12px",
-      borderRadius: "12px",
-      background: "rgba(255, 255, 197, 0.2)",
-      border: "1px solid rgba(255, 255, 197, 0.4)",
-      boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-    }}
-  >
-    SIGNETIC
-  </span>
-</div>
-
-
-
-      <h2 style={{ fontSize: "clamp(1rem, 6vw, 1.5rem)", margin: "0 0 10px 0", color: "#272704ff", minHeight: "30px" }}>
-        {gesture}
-      </h2>
-      <div style={{ width: "100%", maxWidth: "480px", padding: "10px", border: `2px solid ${THEME_COLOR}`, borderRadius: 12, minHeight: "50px", fontSize: "1.2rem", background: `rgba(${THEME_RGB}, 0.1)`, wordWrap: "break-word", textAlign: "left", marginBottom: "15px" }}>
-        {text || <span style={{ opacity: 0.5 }}>Start signing...</span>}
+    <div style={{ background: "#ede7e7", minHeight: "100vh", padding: "20px", display: "flex", flexDirection: "column", alignItems: "center" }}>
+      <h1 style={{ color: "#333", marginBottom: "10px" }}>Sign Language Detector</h1>
+      <h2 style={{ fontSize: "3rem", color: "#2b9308", margin: "10px 0" }}>{gesture}</h2>
+      <div style={{ width: "90%", maxWidth: "500px", padding: "15px", background: "white", borderRadius: "8px", border: "2px solid #ccc", minHeight: "60px", fontSize: "1.5rem", marginBottom: "20px", display:"flex", alignItems:"center", justifyContent:"center" }}>
+        {text || <span style={{color: "#ccc"}}>Text will appear here...</span>}
       </div>
-      <div style={{ display: "flex", gap: "15px", marginBottom: "15px" }}>
-        <button onClick={() => { setText(""); lastWrittenLetter.current = ""; }} style={{ padding: "8px 16px", background: "red", color: "#fff", border: "none", borderRadius: 8, fontSize: "0.9rem", fontWeight: "bold", cursor: "pointer" }}>CLEAR</button>
-        <button onClick={() => { setText((t) => t.slice(0, -1)); lastWrittenLetter.current = ""; }} style={{ padding: "8px 16px", background: "orange", color: "#fff", border: "none", borderRadius: 8, fontSize: "0.9rem", fontWeight: "bold", cursor: "pointer" }}>BACK</button>
-        <button onClick={speakText} style={{ padding: "8px 16px", background: "#2b9308ff", color: "#fff", border: "none", borderRadius: 8, fontSize: "0.9rem", fontWeight: "bold", cursor: "pointer" }}>🔊 HEAR</button>
+      <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+        <button onClick={handleSpace} style={btnStyle}>SPACE</button>
+        <button onClick={handleBackspace} style={{...btnStyle, background:"orange"}}>BACK</button>
+        <button onClick={handleClear} style={{...btnStyle, background:"red"}}>CLEAR</button>
       </div>
-      <div style={{ position: "relative", width: dim.w, height: dim.h, border: `4px solid #272704ff`, borderRadius: "20px", overflow: "hidden", backgroundColor: "#000", boxShadow: `0 0 15px rgba(0,0,0,0.3)` }}>
+      {/* Ensure Webcam is mirrored AND Canvas is exactly on top */}
+      <div style={{ position: "relative", width: dim.w, height: dim.h, borderRadius: "12px", overflow: "hidden", border: "4px solid #333", boxShadow: "0 10px 20px rgba(0,0,0,0.3)" }}>
         <Webcam 
             ref={webcamRef} 
-            mirrored 
             width={dim.w} 
             height={dim.h} 
-            videoConstraints={{ facingMode: "user" }} 
-            style={{ 
-                width: "100%", 
-                height: "100%", 
-                objectFit: "contain"
-            }} 
+            mirrored={true} // Visual mirroring
+            style={{ width: "100%", height: "100%", objectFit: "cover" }} 
         />
-        <canvas ref={canvasRef} style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
+        <canvas 
+            ref={canvasRef} 
+            width={dim.w} 
+            height={dim.h} 
+            style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} // Canvas on top
+        />
       </div>
     </div>
   );
 }
+
+const btnStyle = { padding: "10px 20px", borderRadius: "6px", border: "none", background: "#333", color: "white", fontWeight: "bold", cursor: "pointer", fontSize: "1rem" };
