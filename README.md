@@ -5,7 +5,7 @@
 
 ---
 
-## 🌍 Problem Statement
+## 🌍 The Problem
 
 Communication between sign language users and non-signers remains a major accessibility challenge in everyday digital interactions. Existing solutions typically suffer from one or more of the following limitations:
 
@@ -27,7 +27,7 @@ There is a strong need for a **lightweight, real-time, privacy-preserving, and a
 
 Instead of relying on cloud APIs or black-box classifiers, Signetic uses a **pose-based, explainable computer vision pipeline** that converts hand gestures into readable text with minimal latency.
 
-### Core Design Principles
+### Core Principles
 
 * 🧠 **Pose-based ML** instead of raw image classification
 * 🔐 **Zero backend** – complete user privacy
@@ -285,6 +285,7 @@ It stands at the intersection of:
 ---
 
 > "Accessibility should not be limited by permission, hardware, or compromise — Signetic proves that."
+
 
 
 
