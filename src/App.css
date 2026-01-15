@@ -4,67 +4,31 @@ body {
   margin: 0;
   font-family: 'Inter', sans-serif;
   color: #333;
-  /* Winter background */
+  /* WINTER THEME BACKGROUND */
   background: url('https://images.unsplash.com/photo-1491002052546-bf38f186af56?q=80&w=2083&auto=format&fit=crop') no-repeat center center fixed;
   background-size: cover;
-  overflow-x: hidden; /* Prevent horizontal scrollbar from wide snowflakes */
 }
 
-/* --- SNOWFALL ANIMATION --- */
-.snow-container {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none; /* Clicks pass through the snow */
-  z-index: 9999; /* Sit on top of everything except maybe modals */
-  overflow: hidden;
-}
-
-.snowflake {
-  position: absolute;
-  top: -20px;
-  color: #fff;
-  user-select: none;
-  animation-name: fall;
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
-}
-
-@keyframes fall {
-  0% { transform: translateY(0); }
-  100% { transform: translateY(105vh); }
-}
-
-/* --- MAIN LAYOUT --- */
 .app-container {
   display: flex;
   flex-direction: column;
   align-items: center;
   min-height: 100vh;
   padding: 40px 20px;
-  /* Glassmorphism tint */
+  /* Adds a subtle white tint over the image so text stays readable */
   background-color: rgba(255, 255, 255, 0.3); 
-  backdrop-filter: blur(3px); 
-  position: relative; 
-  z-index: 1; /* Content sits below snow visually if snow z-index is higher, or above if we want snow behind. */
+  backdrop-filter: blur(3px); /* Optional: slight blur for focus */
 }
-/* Let's make snow sit BEHIND the control panels but IN FRONT of the background */
-/* Update: To make it look immersive, z-index: 0 for container, fixed snow at -1? */
-/* Actually, standard is snow ON TOP usually looks best for "atmosphere". Kept snow at 9999 pointer-events:none */
-
 
 .header {
   display: flex;
   align-items: center;
   gap: 15px;
   margin-bottom: 30px;
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.85); /* Frosted header */
   padding: 10px 20px;
   border-radius: 20px;
   box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-  z-index: 10;
 }
 
 .logo {
@@ -88,7 +52,6 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 20px;
-  z-index: 10;
 }
 
 .gesture-status {
@@ -105,7 +68,7 @@ body {
 
 .text-output {
   width: 100%;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.9); /* High opacity for readability */
   padding: 18px 24px;
   border-radius: 16px;
   box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
@@ -168,6 +131,7 @@ body {
   flex: 1; 
   min-width: 80px;
   max-width: 120px; 
+  /* Add subtle shadow to buttons to pop against snow */
   box-shadow: 0 4px 6px rgba(0,0,0,0.1);
 }
 
@@ -180,10 +144,26 @@ body {
   transform: scale(0.96);
 }
 
-.btn-primary { background-color: #2c3e50; color: white; }
-.btn-warning { background-color: #e67e22; color: white; }
-.btn-speak   { background-color: #8e44ad; color: white; }
-.btn-danger  { background-color: #c0392b; color: white; }
+/* --- BUTTON COLORS --- */
+.btn-primary { 
+  background-color: #2c3e50; /* Dark Slate */
+  color: white; 
+}
+
+.btn-warning { 
+  background-color: #e67e22; /* Carrot Orange */
+  color: white; 
+}
+
+.btn-speak {
+  background-color: #8e44ad; /* Amethyst Purple */
+  color: white;
+}
+
+.btn-danger { 
+  background-color: #c0392b; /* Deep Red */
+  color: white; 
+}
 
 @media (max-width: 600px) {
   .app-title { font-size: 2rem; }
