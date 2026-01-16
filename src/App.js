@@ -15,7 +15,7 @@ export default function App() {
   const [mpLandmarker, setMpLandmarker] = useState(null);
   const [gesture, setGesture] = useState("⏳ Loading Models...");
   const [text, setText] = useState("");
-  const [dim, setDim] = useState({ w: 480, h: 360 });
+  //const [dim, setDim] = useState({ w: 480, h: 360 });
 
   // --- CONFIG ---
   const YOLO_PATH = 'best_web_model/model.json';
