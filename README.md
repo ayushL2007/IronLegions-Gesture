@@ -33,8 +33,10 @@ Instead of relying on cloud APIs or black-box classifiers, Signetic uses a **pos
 * 🔐 **Zero backend** – complete user privacy
 * ⚡ **Low latency** via WebGL-accelerated inference
 * ♿ **Accessibility-first** with speech output
-* 🧩 **Can be used by anyone instantly , as it comes with no hardware restrictions and is a fast single page web application
-* ➕ **Added features like Clear all, backspace, and text to speech for more accessibility
+* 🧩 **Can be used by anyone instantly , as it comes with no hardware restrictions and is a fast single page web application**
+* 📂 **History Saving** – previous words saved via browser cookies
+* 🎨 **Theme Switcher** – toggle between light and dark modes
+* ➕ **Added features like Clear all, backspace, and text to speech for more accessibility**
 
 ---
 
@@ -53,7 +55,7 @@ Rule-Based Gesture Classification
    ↓
 Temporal Stabilization Engine
    ↓
-Text Output + Text-to-Speech
+Text Output + Text-to-Speech + History saving
 ```
 
 ---
@@ -191,9 +193,21 @@ Only **consistent gestures across multiple frames** are converted into text.
 
 * **Text-to-Speech** using the Web Speech API
 * Converts translated text into audible speech
+* Saves the text output via browser cookies
 * Enables two-way communication between signers and non-signers
 
 ---
+
+## 💾 History Saving & Theme Switcher
+
+* **Previous Words Record**: Signetic saves translated words using **browser cookies**  
+  * Users can view and manage their history  
+  * Option to **delete logs** and clear previous entries  
+
+* **Theme Switcher**: Toggle between **light** and **dark** modes for user comfort  
+
+---
+
 
 ## 🧪 Why Dual-Model Architecture (YOLO + MediaPipe)?
 
@@ -268,6 +282,7 @@ These technologies enable:
 * Personalized gesture calibration
 * Sign-to-Sign translation
 * Integration on large platforms
+* **Enhanced UX**: Advanced history management, customizable themes, and accessibility personalization 
 
 ---
 
@@ -285,6 +300,7 @@ It stands at the intersection of:
 ---
 
 > "Accessibility should not be limited by permission, hardware, or compromise — Signetic proves that."
+
 
 
 
