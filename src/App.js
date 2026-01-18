@@ -38,7 +38,7 @@ export default function App() {
   // --- CONFIG ---
   const YOLO_PATH = 'best_web_model/model.json';
   const INPUT_SIZE = 320;
-  const CONFIDENCE_THRESHOLD = 0.81; 
+  const CONFIDENCE_THRESHOLD = 0.78; 
   const STABLE_THRESHOLD = 10;
 
   // --- REFS ---
