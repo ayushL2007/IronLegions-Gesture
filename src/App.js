@@ -421,7 +421,7 @@ export default function App() {
             </div>
           </div>
           <button className="sidebar-toggle" onClick={toggleTheme} title="Toggle Theme">
-             {theme === 'dark' ? '☀️' : '🌙'}
+             {theme === 'dark' ? '🌑' : '☀️'}
           </button>
         </header>
 
