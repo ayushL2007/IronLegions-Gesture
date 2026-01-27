@@ -1,4 +1,5 @@
-<img width="2" height="1" alt="image" src="https://github.com/user-attachments/assets/4d491f80-359d-41ce-ab1c-1f527f13422c" /># Signetic 
+# Signetic
+<img width="2" height="1" alt="image" src="https://github.com/user-attachments/assets/4d491f80-359d-41ce-ab1c-1f527f13422c" />
 🔴 LIVE DEMO  : https://signetic.vercel.app/
 
 ## Real-Time Sign Language to Text & Voice Converter
@@ -309,5 +310,6 @@ It stands at the intersection of:
 Acknowledgement: [Rion Dsilvia](https://github.com/RionDsilvaCS/yolo-hand-pose) for her yolo v8 model
 
 Made with ❤️ by Ayush nd Anurag
+
 
 
