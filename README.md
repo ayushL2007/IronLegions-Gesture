@@ -306,7 +306,8 @@ It stands at the intersection of:
 
 
 
-Acknowledgement: (Rion Dsilvia)[https://github.com/RionDsilvaCS/yolo-hand-pose] for her yolo v8 model
+Acknowledgement: [Rion Dsilvia](https://github.com/RionDsilvaCS/yolo-hand-pose) for her yolo v8 model
 
 Made with ❤️ by Ayush nd Anurag
+
 
